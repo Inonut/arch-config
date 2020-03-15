@@ -1,0 +1,126 @@
+- name: config arch linux
+  hosts: vagrant
+  gather_facts: false
+  become: true
+  become_method: sudo
+  tasks:
+    - name: Util packages
+      pacman:
+        name:
+          - base-devel
+          - unzip
+          - ncdu
+          - os-prober
+          - networkmanager
+          - docker
+          - docker-compose
+          - git
+        update_cache: yes
+
+    - name: Create ramdisk environmen
+      raw: "mkinitcpio -p linux"
+
+    - name: Config network
+      block:
+        - name: set mashine name
+          template:
+            src: ./templates/hostname.j2
+            dest: /etc/hostname
+
+        - name: set hosts
+          template:
+            src: ./templates/hosts.j2
+            dest: /etc/hosts
+
+        - name: enable network manager
+          systemd:
+            name: NetworkManager
+            enabled: yes
+
+    - name: Config language
+      block:
+        - name: modify locale.gen
+          lineinfile:
+            dest: /etc/locale.gen
+            line: |
+              en_US.UTF-8 UTF-8
+              en_US ISO-8859-1
+            create: yes
+
+        - name: modify locale.conf
+          lineinfile:
+            dest: /etc/locale.conf
+            line: |
+              LANG=en_US.UTF-8
+              LC_ADDRESS=ro_RO.UTF-8
+              LC_IDENTIFICATION=ro_RO.UTF-8
+              LC_MEASUREMENT=ro_RO.UTF-8
+              LC_MONETARY=ro_RO.UTF-8
+              LC_NAME=ro_RO.UTF-8
+              LC_NUMERIC=ro_RO.UTF-8
+              LC_PAPER=ro_RO.UTF-8
+              LC_TELEPHONE=ro_RO.UTF-8
+              LC_TIME=ro_RO.UTF-8
+            create: yes
+
+        - name: generate locale
+          raw: "locale-gen"
+
+    - name: Config time
+      block:
+        - name: Create symbolic link
+          file:
+            src: "/usr/share/zoneinfo/{{ time_zone }}"
+            dest: "/etc/localtime"
+            state: link
+
+        - name: Set timezone
+          raw: "hwclock --systohc --utc"
+
+        - name: Fix dual boot time
+          raw: "timedatectl set-local-rtc 1 --adjust-system-clock"
+
+    - name: Config root user
+      user:
+        name: root
+        password: "{{ host.pass | password_hash('sha512') }}"
+
+    - name: Config dragos user
+      block:
+        - name: Add user
+          user:
+            name: "{{ user.name }}"
+            password: "{{ user.pass | password_hash('sha512') }}"
+            groups:
+              - wheel
+            state: present
+            system: yes
+            shell: /bin/bash
+            createhome: yes
+            home: "/home/{{user.name}}"
+
+        - name: Allow specified groups to sudo
+          lineinfile:
+            path: /etc/sudoers
+            state: present
+            regexp: '# %wheel ALL=(ALL) ALL'
+            line: '%wheel ALL=(ALL) ALL'
+
+    - name: Config docker
+      block:
+        - name: enable docker
+          systemd:
+            name: docker
+            enabled: yes
+
+        - name: Add user in docker group
+          user:
+            name: "{{ user.name }}"
+            groups:
+              - docker
+
+#    - name: Config yay
+#      block:
+#        - name: get yay repo
+#          git:
+#            repo: https://aur.archlinux.org/yay.git

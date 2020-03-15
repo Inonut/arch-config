@@ -19,7 +19,7 @@ Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
     vb.customize ["modifyvm", :id, "--vram", "256"]
   end
 
-  config.vm.provision "shell", inline: "pacman --noconfirm -Sy netctl"
+  config.vm.provision "shell", inline: "pacman --noconfirm -Sy netctl archlinux-keyring"
 
   config.vm.provision "shell", inline: "mkdir -p /root/.ssh"
   authorize_key_for_root config, '~/.ssh/id_dsa.pub', '~/.ssh/id_rsa.pub'
