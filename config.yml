@@ -1,0 +1,10 @@
+- name: config arch linux
+  hosts: vagrant
+  gather_facts: false
+  tasks:
+    - name: test
+      raw: pwd
+      register: output
+
+    - debug:
+        msg: "{{output}}"
