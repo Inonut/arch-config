@@ -196,7 +196,7 @@ class PartitionTable(urwid.Frame):
             self.updatePartitionLabelDetails()
 
         if key == 'left' and self.partitionDetailBox in self.get_focus_widgets():
-            self.updatePartitionLabelDetails()
+            self.updatePartitionDeviceDetails()
 
         if key == 'right' and self.deviceBox in self.get_focus_widgets():
             self.instructions.set_text('Use UP/DOWN to move, can be editable, !!! BE CAREFUL !!!')
