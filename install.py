@@ -57,7 +57,8 @@ class PartitionTable(urwid.Frame):
             urwid.RadioButton(self.partitionLabelGroup, PartitionLabel.MRB.value[0]),
         ])
         self.deviceList = urwid.SimpleListWalker([
-            urwid.Button(device.path, on_press=self.replaceDevice, user_data=device.path) for device in self.currentDevices()
+            urwid.Button(device.path, on_press=self.replaceDevice, user_data=device.path) for device in
+            self.currentDevices()
         ])
         self.description = urwid.Text('')
         self.instructions = urwid.Text('')
@@ -204,6 +205,139 @@ class PartitionTable(urwid.Frame):
         return super().keypress(size, key)
 
 
+
+class BoxButton(urwid.WidgetWrap):
+    signals = ["click"]
+
+    def __init__(self, label, on_press=None, user_data=None, attr_map='button', focus_map='highlight'):
+
+        self._user_data = user_data
+
+        self._label = urwid.Text(label, align=urwid.CENTER)
+
+        w = urwid.AttrMap(
+            w=urwid.LineBox(self._label),
+            attr_map=attr_map,
+            focus_map=focus_map)
+
+        super().__init__(w)
+
+        if on_press:
+            urwid.connect_signal(self, 'click', on_press, self._user_data)
+
+    def set_label(self, label):
+        self._label.set_text(label)
+
+    def get_label(self):
+        return self._label.text
+
+    def getUserData(self):
+        return self._user_data
+
+    def selectable(self):
+        return True
+
+    def keypress(self, size, key):
+        if self._command_map[key] != urwid.ACTIVATE:
+            return key
+
+        self._emit('click')
+
+    def mouse_event(self, size, event, button, x, y, focus):
+        if button != 1 or not urwid.util.is_mouse_press(event):
+            return False
+
+        self._emit('click')
+        return True
+
+
+class BoxPicker(urwid.WidgetPlaceholder):
+    signals = ["click"]
+
+    def __init__(self, label, choices=[""], attr_map='button', focus_map='highlight'):
+
+        self._selected_index = None
+        self.choices = choices
+
+        self._label = urwid.Text(label, align=urwid.CENTER)
+        self.line_box_widget = urwid.LineBox(
+            original_widget=urwid.WidgetPlaceholder(self._label),
+            title_align=urwid.LEFT
+        )
+
+        w = urwid.AttrMap(
+            w=self.line_box_widget,
+            attr_map=attr_map,
+            focus_map=focus_map)
+
+        super().__init__(w)
+
+        urwid.connect_signal(self, 'click', lambda el: self.show_choices())
+
+        self.show_on_selection_display()
+
+    def show_choices(self):
+        self.line_box_widget.set_title(self.get_label())
+
+        self.line_box_widget.original_widget.original_widget = urwid.Text(self.choices[self._selected_index])
+
+    def show_on_selection_display(self):
+        self.line_box_widget.set_title("")
+
+        self.line_box_widget.original_widget.original_widget = urwid.Columns(
+            widget_list=[
+                self._label,
+                (1, urwid.Text('▼', urwid.RIGHT))
+            ],
+            dividechars=2
+        )
+
+    def set_label(self, label):
+        self._label.set_text(label)
+
+    def get_label(self):
+        return self._label.text
+
+    def get_selected_index(self):
+        return self._selected_index
+
+    def get_selected_value(self):
+        return self.choices[self._selected_index]
+
+    def selectable(self):
+        return True
+
+    def keypress(self, size, key):
+        if self._selected_index is None:
+            self._selected_index = 0
+
+        if self._command_map[key] != urwid.ACTIVATE:
+            if key == 'ctrl up':
+                if self._selected_index != 0:
+                    self._selected_index = self._selected_index - 1
+
+                self.show_choices()
+            if key == 'ctrl down':
+                if self._selected_index != len(self.choices) - 1:
+                    self._selected_index = self._selected_index + 1
+
+                self.show_choices()
+            return key
+
+        self._emit('click')
+
+    def mouse_event(self, size, event, button, x, y, focus):
+        if button != 1 or not urwid.util.is_mouse_press(event):
+            return False
+
+        if self._selected_index is None:
+            self._selected_index = 0
+
+        self._emit('click')
+        return True
+
+
+
 if __name__ == '__main__':
 
     def exit_on_q(key):
@@ -211,13 +345,28 @@ if __name__ == '__main__':
             raise urwid.ExitMainLoop()
 
 
+    def exit(key):
+        raise urwid.ExitMainLoop()
+
+
     palette = [
         ('reversed', 'standout', ''),
-        ('help', 'white', 'dark green', 'underline')
+        ('help', 'white', 'dark green'),
+
+        ('highlight', 'white', 'dark green'),
+        ("ilb_highlight_offFocus",    "black",            "dark cyan")
     ]
 
-    view = PartitionTable()
+    view = urwid.Filler(urwid.Pile([
+        BoxButton('asdASDASDASDAWDA', on_press=exit),
+        BoxButton('asdDQWDQWDQAWD'),
+        BoxPicker('Chooseeeeee', choices=[
+            '1',
+            '2',
+            '3',
+            '4',
+            '5',
+        ]),
+    ]))
 
     urwid.MainLoop(view, palette=palette, unhandled_input=exit_on_q).run()
-
-    print(view.processResult())
