@@ -1,0 +1,21 @@
+{
+  "partition": {
+    "label": "",
+    "replacePartition": "",
+    "custom": {
+      "boot": "",
+      "swap": "",
+      "root": ""
+    }
+  },
+  "defaultUser": {
+    "name": "",
+    "password": ""
+  },
+  "root": {
+    "hostName": "",
+    "password": ""
+  },
+  "languages": [],
+  "time": ""
+}

@@ -1,372 +1,189 @@
-import enum
-import shlex
-import subprocess
-import typing
-import parted
-import urwid
-
-
-class PartitionLabel(enum.Enum):
-    GPT = ('GPT Partition', 'New and better')
-    MRB = ('MRB Partition', 'Old and good')
-
-
-class PartitionModel(object):
-
-    def __init__(self,
-                 label: PartitionLabel = PartitionLabel.GPT,
-                 root: str = None,
-                 swap: str = None,
-                 boot: str = None,
-                 committed: bool = False,
-                 ) -> None:
-        self.committed = committed
-        self.boot = boot
-        self.swap = swap
-        self.root = root
-        self.label = label
-
-    def __str__(self) -> str:
-        return """
-label = {}
-root = {}
-swap = {}
-boot = {}
-committed = {}
-""".format(self.label, self.root, self.swap, self.boot, self.committed)
-
-
-def raise_(ex):
-    raise ex
-
-
-class PartitionTable(urwid.Frame):
-
-    def __init__(self,
-                 onOk=lambda result: raise_(urwid.ExitMainLoop()),
-                 onCancel=lambda: raise_(urwid.ExitMainLoop())
-                 ):
-
-        self.isCommitted = False
-        self.onOk = onOk
-        self.onCancel = onCancel
-        self.partitionLabelGroup = []
-
-        self.labelList = urwid.SimpleListWalker([
-            urwid.RadioButton(self.partitionLabelGroup, PartitionLabel.GPT.value[0]),
-            urwid.RadioButton(self.partitionLabelGroup, PartitionLabel.MRB.value[0]),
-        ])
-        self.deviceList = urwid.SimpleListWalker([
-            urwid.Button(device.path, on_press=self.replaceDevice, user_data=device.path) for device in
-            self.currentDevices()
-        ])
-        self.description = urwid.Text('')
-        self.instructions = urwid.Text('')
-        self.bootText = urwid.Edit('')
-        self.swapText = urwid.Edit('')
-        self.rootText = urwid.Edit('')
-
-        self.detailBox = urwid.LineBox(
-            title='Details',
-            original_widget=urwid.Filler(
-                valign=urwid.TOP,
-                body=urwid.Pile([
-                    urwid.AttrMap(self.instructions, 'reversed'),
-                    self.description
-                ])
-            )
-        )
-        self.partitionLabelBox = urwid.LineBox(
-            title='Partition Label',
-            original_widget=urwid.ListBox(self.labelList)
-        )
-        self.deviceBox = urwid.LineBox(
-            title='Found devices',
-            original_widget=urwid.ListBox(self.deviceList)
-        )
-        self.partitionDetailBox = urwid.LineBox(
-            title='What actually need',
-            original_widget=urwid.ListBox(urwid.SimpleListWalker([
-                urwid.Columns([
-                    (7, urwid.Text('Boot:')),
-                    self.bootText
-                ]),
-                urwid.Columns([
-                    (7, urwid.Text('Swap:')),
-                    self.swapText
-                ]),
-                urwid.Columns([
-                    (7, urwid.Text('Root:')),
-                    self.rootText
-                ]),
-            ]))
-        )
-
-        body = urwid.Pile([
-            self.detailBox,
-            urwid.Columns([
-                (30, self.partitionLabelBox),
-                urwid.LineBox(
-                    title='Partition Devices',
-                    original_widget=urwid.Columns([
-                        self.deviceBox,
-                        self.partitionDetailBox,
-                    ])
-                ),
-            ])
-        ])
-
-        footer = urwid.Columns([
-            urwid.AttrMap(urwid.Text('Use tab to arrive here -->>>'), 'help'),
-            urwid.GridFlow([
-                urwid.Button('Ok', on_press=self._commit),
-                urwid.Button('Cancel', on_press=self._rollback),
-            ], 10, 3, 3, urwid.RIGHT)
-        ])
-
-        super().__init__(body, footer=footer)
 
-        urwid.connect_signal(self.labelList, 'modified', self.updatePartitionLabelDetails)
-        urwid.connect_signal(self.deviceList, 'modified', self.updatePartitionDeviceDetails)
-        self.updatePartitionLabelDetails()
-
-    def replaceDevice(self, btn, path):
-        # self.description.set_text(path + '1')
-        prefix = ''
-        if path[-1].isdigit():
-            prefix = 'p'
-        self.bootText.set_edit_text(path + prefix + '1')
-        self.swapText.set_edit_text(path + prefix + '2')
-        self.rootText.set_edit_text(path + prefix + '3')
-
-    def processResult(self) -> PartitionModel:
-        result = PartitionModel()
-        result.committed = self.isCommitted
-
-        for o in self.partitionLabelGroup:
-            if o.get_state() is True:
-                if PartitionLabel.GPT.value[0] == o.get_label():
-                    result.label = PartitionLabel.GPT.name
-                elif PartitionLabel.MRB.value[0] == o.get_label():
-                    result.label = PartitionLabel.MRB.name
-
-        result.boot = self.bootText.get_text()[0]
-        result.swap = self.swapText.get_text()[0]
-        result.root = self.rootText.get_text()[0]
-
-        return result
-
-    def _commit(self, item):
-        self.isCommitted = True
-        self.onOk(self.processResult())
-
-    def _rollback(self, item):
-        self.isCommitted = False
-        self.onCancel()
-
-    def currentDevices(self) -> typing.List[parted.Device]:
-        return parted.getAllDevices()
-
-    def deviceInformation(self, path: str):
-        cmd = 'fdisk -l {}'.format(path)
-
-        return '\n'.join(subprocess.check_output(shlex.split(cmd)).decode("utf-8").split('\n'))
-
-    def updatePartitionLabelDetails(self):
-        self.instructions.set_text('Use UP/DOWN to move, SPACE/ENTER to select')
-        if self.labelList.get_focus()[0].label == PartitionLabel.GPT.value[0]:
-            self.description.set_text(PartitionLabel.GPT.value[1])
-        elif self.labelList.get_focus()[0].label == PartitionLabel.MRB.value[0]:
-            self.description.set_text(PartitionLabel.MRB.value[1])
-
-    def updatePartitionDeviceDetails(self):
-        self.instructions.set_text('Use UP/DOWN to move, ENTER to select')
-        self.description.set_text(self.deviceInformation(self.deviceList.get_focus()[0].label))
-
-    def keypress(self, size, key):
-        if key == 'tab':
-            if self.focus_part == 'body':
-                self.set_focus('footer')
-            elif self.focus_part == 'footer':
-                self.set_focus('body')
-
-        if key == 'right' and self.partitionLabelBox in self.get_focus_widgets():
-            self.updatePartitionDeviceDetails()
-
-        if key == 'left' and self.deviceBox in self.get_focus_widgets():
-            self.updatePartitionLabelDetails()
-
-        if key == 'left' and self.partitionDetailBox in self.get_focus_widgets():
-            self.updatePartitionDeviceDetails()
-
-        if key == 'right' and self.deviceBox in self.get_focus_widgets():
-            self.instructions.set_text('Use UP/DOWN to move, can be editable, !!! BE CAREFUL !!!')
-
-        return super().keypress(size, key)
-
-
-
-class BoxButton(urwid.WidgetWrap):
-    signals = ["click"]
-
-    def __init__(self, label, on_press=None, user_data=None, attr_map='button', focus_map='highlight'):
-
-        self._user_data = user_data
-
-        self._label = urwid.Text(label, align=urwid.CENTER)
-
-        w = urwid.AttrMap(
-            w=urwid.LineBox(self._label),
-            attr_map=attr_map,
-            focus_map=focus_map)
-
-        super().__init__(w)
-
-        if on_press:
-            urwid.connect_signal(self, 'click', on_press, self._user_data)
-
-    def set_label(self, label):
-        self._label.set_text(label)
-
-    def get_label(self):
-        return self._label.text
-
-    def getUserData(self):
-        return self._user_data
-
-    def selectable(self):
-        return True
-
-    def keypress(self, size, key):
-        if self._command_map[key] != urwid.ACTIVATE:
-            return key
-
-        self._emit('click')
-
-    def mouse_event(self, size, event, button, x, y, focus):
-        if button != 1 or not urwid.util.is_mouse_press(event):
-            return False
-
-        self._emit('click')
-        return True
-
-
-class BoxPicker(urwid.WidgetPlaceholder):
-    signals = ["click"]
-
-    def __init__(self, label, choices=[""], attr_map='button', focus_map='highlight'):
-
-        self._selected_index = None
-        self.choices = choices
-
-        self._label = urwid.Text(label, align=urwid.CENTER)
-        self.line_box_widget = urwid.LineBox(
-            original_widget=urwid.WidgetPlaceholder(self._label),
-            title_align=urwid.LEFT
-        )
-
-        w = urwid.AttrMap(
-            w=self.line_box_widget,
-            attr_map=attr_map,
-            focus_map=focus_map)
-
-        super().__init__(w)
-
-        urwid.connect_signal(self, 'click', lambda el: self.show_choices())
-
-        self.show_on_selection_display()
-
-    def show_choices(self):
-        self.line_box_widget.set_title(self.get_label())
-
-        self.line_box_widget.original_widget.original_widget = urwid.Text(self.choices[self._selected_index])
-
-    def show_on_selection_display(self):
-        self.line_box_widget.set_title("")
-
-        self.line_box_widget.original_widget.original_widget = urwid.Columns(
-            widget_list=[
-                self._label,
-                (1, urwid.Text('▼', urwid.RIGHT))
-            ],
-            dividechars=2
-        )
-
-    def set_label(self, label):
-        self._label.set_text(label)
-
-    def get_label(self):
-        return self._label.text
-
-    def get_selected_index(self):
-        return self._selected_index
-
-    def get_selected_value(self):
-        return self.choices[self._selected_index]
-
-    def selectable(self):
-        return True
-
-    def keypress(self, size, key):
-        if self._selected_index is None:
-            self._selected_index = 0
-
-        if self._command_map[key] != urwid.ACTIVATE:
-            if key == 'ctrl up':
-                if self._selected_index != 0:
-                    self._selected_index = self._selected_index - 1
-
-                self.show_choices()
-            if key == 'ctrl down':
-                if self._selected_index != len(self.choices) - 1:
-                    self._selected_index = self._selected_index + 1
-
-                self.show_choices()
-            return key
-
-        self._emit('click')
-
-    def mouse_event(self, size, event, button, x, y, focus):
-        if button != 1 or not urwid.util.is_mouse_press(event):
-            return False
-
-        if self._selected_index is None:
-            self._selected_index = 0
-
-        self._emit('click')
-        return True
-
-
-
-if __name__ == '__main__':
-
-    def exit_on_q(key):
-        if key in ('q', 'Q'):
-            raise urwid.ExitMainLoop()
-
-
-    def exit(key):
-        raise urwid.ExitMainLoop()
-
-
-    palette = [
-        ('reversed', 'standout', ''),
-        ('help', 'white', 'dark green'),
-
-        ('highlight', 'white', 'dark green'),
-        ("ilb_highlight_offFocus",    "black",            "dark cyan")
+from asciimatics.widgets import Frame, ListBox, Layout, Divider, Text, \
+    Button, TextBox, Widget
+from asciimatics.scene import Scene
+from asciimatics.screen import Screen
+from asciimatics.exceptions import ResizeScreenError, NextScene, StopApplication
+import sys
+import sqlite3
+
+
+class ContactModel(object):
+    def __init__(self):
+        # Create a database in RAM
+        self._db = sqlite3.connect(':memory:')
+        self._db.row_factory = sqlite3.Row
+
+        # Create the basic contact table.
+        self._db.cursor().execute('''
+            CREATE TABLE contacts(
+                id INTEGER PRIMARY KEY,
+                name TEXT,
+                phone TEXT,
+                address TEXT,
+                email TEXT,
+                notes TEXT)
+        ''')
+        self._db.commit()
+
+        # Current contact when editing.
+        self.current_id = None
+
+    def add(self, contact):
+        self._db.cursor().execute('''
+            INSERT INTO contacts(name, phone, address, email, notes)
+            VALUES(:name, :phone, :address, :email, :notes)''',
+                                  contact)
+        self._db.commit()
+
+    def get_summary(self):
+        return self._db.cursor().execute(
+            "SELECT name, id from contacts").fetchall()
+
+    def get_contact(self, contact_id):
+        return self._db.cursor().execute(
+            "SELECT * from contacts WHERE id=:id", {"id": contact_id}).fetchone()
+
+    def get_current_contact(self):
+        if self.current_id is None:
+            return {"name": "", "address": "", "phone": "", "email": "", "notes": ""}
+        else:
+            return self.get_contact(self.current_id)
+
+    def update_current_contact(self, details):
+        if self.current_id is None:
+            self.add(details)
+        else:
+            self._db.cursor().execute('''
+                UPDATE contacts SET name=:name, phone=:phone, address=:address,
+                email=:email, notes=:notes WHERE id=:id''',
+                                      details)
+            self._db.commit()
+
+    def delete_contact(self, contact_id):
+        self._db.cursor().execute('''
+            DELETE FROM contacts WHERE id=:id''', {"id": contact_id})
+        self._db.commit()
+
+
+class ListView(Frame):
+    def __init__(self, screen, model):
+        super(ListView, self).__init__(screen,
+                                       screen.height * 2 // 3,
+                                       screen.width * 2 // 3,
+                                       on_load=self._reload_list,
+                                       hover_focus=True,
+                                       can_scroll=False,
+                                       title="Contact List")
+        # Save off the model that accesses the contacts database.
+        self._model = model
+
+        # Create the form for displaying the list of contacts.
+        self._list_view = ListBox(
+            Widget.FILL_FRAME,
+            model.get_summary(),
+            name="contacts",
+            add_scroll_bar=True,
+            on_change=self._on_pick,
+            on_select=self._edit)
+        self._edit_button = Button("Edit", self._edit)
+        self._delete_button = Button("Delete", self._delete)
+        layout = Layout([100], fill_frame=True)
+        self.add_layout(layout)
+        layout.add_widget(self._list_view)
+        layout.add_widget(Divider())
+        layout2 = Layout([1, 1, 1, 1])
+        self.add_layout(layout2)
+        layout2.add_widget(Button("Add", self._add), 0)
+        layout2.add_widget(self._edit_button, 1)
+        layout2.add_widget(self._delete_button, 2)
+        layout2.add_widget(Button("Quit", self._quit), 3)
+        self.fix()
+        self._on_pick()
+
+    def _on_pick(self):
+        self._edit_button.disabled = self._list_view.value is None
+        self._delete_button.disabled = self._list_view.value is None
+
+    def _reload_list(self, new_value=None):
+        self._list_view.options = self._model.get_summary()
+        self._list_view.value = new_value
+
+    def _add(self):
+        self._model.current_id = None
+        raise NextScene("Edit Contact")
+
+    def _edit(self):
+        self.save()
+        self._model.current_id = self.data["contacts"]
+        raise NextScene("Edit Contact")
+
+    def _delete(self):
+        self.save()
+        self._model.delete_contact(self.data["contacts"])
+        self._reload_list()
+
+    @staticmethod
+    def _quit():
+        raise StopApplication("User pressed quit")
+
+
+class ContactView(Frame):
+    def __init__(self, screen, model):
+        super(ContactView, self).__init__(screen,
+                                          screen.height * 2 // 3,
+                                          screen.width * 2 // 3,
+                                          hover_focus=True,
+                                          can_scroll=False,
+                                          title="Contact Details",
+                                          reduce_cpu=True)
+        # Save off the model that accesses the contacts database.
+        self._model = model
+
+        # Create the form for displaying the list of contacts.
+        layout = Layout([100], fill_frame=True)
+        self.add_layout(layout)
+        layout.add_widget(Text("Name:", "name"))
+        layout.add_widget(Text("Address:", "address"))
+        layout.add_widget(Text("Phone number:", "phone"))
+        layout.add_widget(Text("Email address:", "email"))
+        layout.add_widget(TextBox(
+            Widget.FILL_FRAME, "Notes:", "notes", as_string=True, line_wrap=True))
+        layout2 = Layout([1, 1, 1, 1])
+        self.add_layout(layout2)
+        layout2.add_widget(Button("OK", self._ok), 0)
+        layout2.add_widget(Button("Cancel", self._cancel), 3)
+        self.fix()
+
+    def reset(self):
+        # Do standard reset to clear out form, then populate with new data.
+        super(ContactView, self).reset()
+        self.data = self._model.get_current_contact()
+
+    def _ok(self):
+        self.save()
+        self._model.update_current_contact(self.data)
+        raise NextScene("Main")
+
+    @staticmethod
+    def _cancel():
+        raise NextScene("Main")
+
+
+def demo(screen, scene):
+    scenes = [
+        Scene([ListView(screen, contacts)], -1, name="Main"),
+        Scene([ContactView(screen, contacts)], -1, name="Edit Contact")
     ]
 
-    view = urwid.Filler(urwid.Pile([
-        BoxButton('asdASDASDASDAWDA', on_press=exit),
-        BoxButton('asdDQWDQWDQAWD'),
-        BoxPicker('Chooseeeeee', choices=[
-            '1',
-            '2',
-            '3',
-            '4',
-            '5',
-        ]),
-    ]))
+    screen.play(scenes, stop_on_resize=True, start_scene=scene, allow_int=True)
 
-    urwid.MainLoop(view, palette=palette, unhandled_input=exit_on_q).run()
+
+contacts = ContactModel()
+last_scene = None
+while True:
+    try:
+        Screen.wrapper(demo, catch_interrupt=True, arguments=[last_scene])
+        sys.exit(0)
+    except ResizeScreenError as e:
+        last_scene = e.scene
